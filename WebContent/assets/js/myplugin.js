@@ -1,6 +1,6 @@
 
 $(function () {
-    $.fn.my = function (options) {
+    $.fn.my = function () {
         var defaults = {
             Event: "click",
             msg: "Hello!"

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="utf-8" />
+<title>PDF Diff @pdfhow</title>
+
+<!-- Google web fonts -->
+
+<!-- The main CSS file -->
+<link href="assets/css/style.css" rel="stylesheet" />
+</head>
+
+<body>
+	<div>
+		<div style="float: left;">
+			<form id="upload" method="post" action="UploadServlet"
+				enctype="multipart/form-data">
+				<div id="drop">
+					Drop Here Baseline PDF <a>Browse</a> <input type="file" name="file" />
+				</div>
+				<ul>
+					<!-- The file uploads will be shown here -->
+				</ul>
+			</form>
+		</div>
+		<div style="float: left;">
+			<form id="upload_test" method="post" action="UploadServlet"
+				enctype="multipart/form-data">
+				<div id="drop_test">
+					Drop Here Test PDF <a>Browse</a> <input type="file" name="test_pdf" />
+				</div>
+				<ul>
+					<!-- The file uploads will be shown here -->
+				</ul>
+			</form>
+		</div>
+	</div>
+
+	<footer>
+		<input type="button" id="test" value="test122223">
+	</footer>
+
+	<!-- JavaScript Includes -->
+	<script src="assets/js/jquery-1.12.0.js"></script>
+	<script src="assets/js/jquery.knob.js"></script>
+
+	<!-- jQuery File Upload Dependencies -->
+	<script src="assets/js/jquery.ui.widget.js"></script>
+	<script src="assets/js/jquery.iframe-transport.js"></script>
+	<script src="assets/js/jquery.fileupload.js"></script>
+
+	<!-- Our main JS file -->
+	<script src="assets/js/script.js"></script>
+	<script src="assets/js/copy.upload.js"></script>
+
+	<script src="assets/js/myplugin.js"></script>
+	<script>
+		$(function() {
+			$("#test").my({
+				Event : "click",
+				msg : "here"
+			});
+		});
+	</script>
+</body>
+</html>
