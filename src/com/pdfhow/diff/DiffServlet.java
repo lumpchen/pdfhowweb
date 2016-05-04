@@ -1,8 +1,4 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
+
 package com.pdfhow.diff;
 
 import java.io.File;
@@ -11,10 +7,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
-import java.util.List;
+import java.util.Queue;
 import java.util.Random;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
-import javax.servlet.RequestDispatcher;
+import javax.servlet.AsyncContext;
+import javax.servlet.AsyncEvent;
+import javax.servlet.AsyncListener;
+import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import javax.servlet.annotation.MultipartConfig;
 import javax.servlet.annotation.WebServlet;
@@ -23,83 +25,179 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.Part;
 
-import org.apache.commons.fileupload.FileItem;
-import org.apache.commons.fileupload.FileUploadException;
-import org.apache.commons.fileupload.disk.DiskFileItemFactory;
-import org.apache.commons.fileupload.servlet.ServletFileUpload;
-import org.json.JSONException;
+import org.apache.pdfbox.tools.diff.PDFDiffTool;
 import org.json.JSONObject;
 
 /**
  *
  * @author lim16
  */
-@WebServlet(name = "DiffServlet", urlPatterns = { "/DiffServlet" })
+@WebServlet(name = "DiffServlet", urlPatterns = { "/DiffServlet" }, asyncSupported = true)
 @MultipartConfig
 public class DiffServlet extends HttpServlet {
+	private static final Queue<AsyncContext> queue = new ConcurrentLinkedQueue<AsyncContext>();
+
+	private static final BlockingQueue<String> messageQueue = new LinkedBlockingQueue<String>();
+
+	private static final String JUNK = "<!-- Comet is a programming technique that enables web "
+			+ "servers to send data to the client without having any need " + "for the client to request it. -->\n";
+
+	private Thread notifierThread = null;
 
 	private static final long serialVersionUID = 1278840531343993218L;
+	private String tempID;
 
-	protected void processRequest(HttpServletRequest request, HttpServletResponse response)
-			throws ServletException, IOException {
+	@Override
+	public void init(ServletConfig config) throws ServletException {
+		super.init(config);
+		Runnable notifierRunnable = new Runnable() {
+			public void run() {
+				boolean done = false;
+				while (!done) {
+					String cMessage = null;
+					try {
+						cMessage = messageQueue.take();
+						for (AsyncContext ac : queue) {
+							try {
+								PrintWriter acWriter = ac.getResponse().getWriter();
+								acWriter.println(cMessage);
+								acWriter.flush();
+							} catch (IOException ex) {
+								System.out.println(ex);
+								queue.remove(ac);
+							}
+						}
+					} catch (InterruptedException iex) {
+						done = true;
+						System.out.println(iex);
+					}
+				}
+			}
+		};
+		notifierThread = new Thread(notifierRunnable);
+		notifierThread.start();
 	}
 
 	@Override
-	protected void doGet(HttpServletRequest request, HttpServletResponse response)
+	protected void doGet(HttpServletRequest req, HttpServletResponse res)
 			throws ServletException, IOException {
-		processRequest(request, response);
+		res.setContentType("text/html");
+		res.setHeader("Cache-Control", "private");
+		res.setHeader("Pragma", "no-cache");
+
+		PrintWriter writer = res.getWriter();
+		// for Safari, Chrome, IE and Opera
+		for (int i = 0; i < 10; i++) {
+			writer.write(JUNK);
+		}
+		writer.flush();
+
+		final AsyncContext ac = req.startAsync();
+		ac.setTimeout(1 * 60 * 1000);
+		ac.addListener(new AsyncListener() {
+			public void onComplete(AsyncEvent event) throws IOException {
+				queue.remove(ac);
+			}
+
+			public void onTimeout(AsyncEvent event) throws IOException {
+				System.out.println(ac.toString() + " timeout");
+				queue.remove(ac);
+			}
+
+			public void onError(AsyncEvent event) throws IOException {
+				queue.remove(ac);
+			}
+
+			public void onStartAsync(AsyncEvent event) throws IOException {
+			}
+		});
+		queue.add(ac);
 	}
 
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response)
 			throws ServletException, IOException {
-		if (!ServletFileUpload.isMultipartContent(request)) {
-			throw new IllegalArgumentException(
-					"Request is not multipart, please 'multipart/form-data' enctype for your form.");
-		}
+		response.setContentType("text/plain");
+		response.setHeader("Cache-Control", "private");
+		response.setHeader("Pragma", "no-cache");
 
+		PrintWriter writer = response.getWriter();
+		// for Safari, Chrome, IE and Opera
+		for (int i = 0; i < 10; i++) {
+			writer.write(JUNK);
+		}
+		writer.flush();
+
+		final AsyncContext ac = request.startAsync();
+		ac.setTimeout(1 * 60 * 1000);
+		ac.addListener(new AsyncListener() {
+			public void onComplete(AsyncEvent event) throws IOException {
+				queue.remove(ac);
+			}
+
+			public void onTimeout(AsyncEvent event) throws IOException {
+				System.out.println(ac.toString() + " timeout");
+				queue.remove(ac);
+			}
+
+			public void onError(AsyncEvent event) throws IOException {
+				queue.remove(ac);
+			}
+
+			public void onStartAsync(AsyncEvent event) throws IOException {
+			}
+		});
+		queue.add(ac);
+		
 		OutputStream baseOut = null;
 		OutputStream testOut = null;
 		InputStream baseFilecontent = null;
 		InputStream testFilecontent = null;
 		PrintWriter responseWriter = response.getWriter();
 		try {
+
+			String warRoot = request.getServletContext().getRealPath("/");
+			File tempFolder = createTempFolder(warRoot + "pdfs/");
+			this.tempID = tempFolder.getName();
+
 			Part basePDF = request.getPart("base_pdf");
 			String baseFileName = getFileName(basePDF);
 			if (baseFileName == null) {
-
+				this.reponseError(response, "", null);
 			}
-			baseFileName += "_base";
-			String path = createTempFolder(request.getServletContext().getRealPath("/") + "pdfs/");
-			baseOut = new FileOutputStream(path + baseFileName);
+			baseFileName = "base_" + baseFileName;
+			File baseFile = new File(tempFolder, baseFileName);
+			if (!baseFile.createNewFile()) {
+				this.reponseError(response, "", null);
+			}
+			baseOut = new FileOutputStream(baseFile);
 			baseFilecontent = basePDF.getInputStream();
 			copyStream(baseFilecontent, baseOut);
+			baseOut.close();
 
-			Part testPDF = request.getPart("base_pdf");
+			Part testPDF = request.getPart("test_pdf");
 			String testFileName = getFileName(testPDF);
 			if (testFileName == null) {
-
+				this.reponseError(response, "", null);
 			}
-			testFileName += "_test";
-			testOut = new FileOutputStream(path + testFileName);
-			testFilecontent = basePDF.getInputStream();
+			testFileName = "test_" + testFileName;
+			File testFile = new File(tempFolder, testFileName);
+			if (!testFile.createNewFile()) {
+				this.reponseError(response, "", null);
+			}
+			testOut = new FileOutputStream(testFile);
+			testFilecontent = testPDF.getInputStream();
 			copyStream(testFilecontent, testOut);
+			testOut.close();
 
-			response.setContentType("text/html");
-			response.setHeader("Cache-control", "no-cache, no-store");
-			response.setHeader("Pragma", "no-cache");
-			response.setHeader("Expires", "-1");
+			File reportDir = new File(tempFolder, "report");
 
-			response.setHeader("Access-Control-Allow-Origin", "*");
-			response.setHeader("Access-Control-Allow-Methods", "POST");
-			response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-			response.setHeader("Access-Control-Max-Age", "86400");
-
-			JSONObject myObj = new JSONObject();
-			myObj.put("success", true);
-			myObj.put("isDiff", false);
-			responseWriter.println(myObj.toString());
-		} catch (JSONException e) {
+			DiffWorker worker = new DiffWorker(baseFile, testFile, reportDir, messageQueue);
+//			request.getSession().setAttribute("DiffWorker", worker);
+			worker.start();
+			
+			response.getWriter().println("success");
+		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
 			if (baseOut != null) {
@@ -118,11 +216,116 @@ public class DiffServlet extends HttpServlet {
 				testFilecontent.close();
 			}
 		}
+		/*
+		OutputStream baseOut = null;
+		OutputStream testOut = null;
+		InputStream baseFilecontent = null;
+		InputStream testFilecontent = null;
+		PrintWriter responseWriter = response.getWriter();
+		try {
+
+			String warRoot = request.getServletContext().getRealPath("/");
+			File tempFolder = createTempFolder(warRoot + "pdfs/");
+			this.tempID = tempFolder.getName();
+
+			Part basePDF = request.getPart("base_pdf");
+			String baseFileName = getFileName(basePDF);
+			if (baseFileName == null) {
+				this.reponseError(response, "", null);
+			}
+			baseFileName = "base_" + baseFileName;
+			File baseFile = new File(tempFolder, baseFileName);
+			if (!baseFile.createNewFile()) {
+				this.reponseError(response, "", null);
+			}
+			baseOut = new FileOutputStream(baseFile);
+			baseFilecontent = basePDF.getInputStream();
+			copyStream(baseFilecontent, baseOut);
+			baseOut.close();
+
+			Part testPDF = request.getPart("test_pdf");
+			String testFileName = getFileName(testPDF);
+			if (testFileName == null) {
+				this.reponseError(response, "", null);
+			}
+			testFileName = "test_" + testFileName;
+			File testFile = new File(tempFolder, testFileName);
+			if (!testFile.createNewFile()) {
+				this.reponseError(response, "", null);
+			}
+			testOut = new FileOutputStream(testFile);
+			testFilecontent = testPDF.getInputStream();
+			copyStream(testFilecontent, testOut);
+			testOut.close();
+
+			File reportDir = new File(tempFolder, "report");
+
+			DiffWorker worker = new DiffWorker(baseFile, testFile, reportDir);
+			request.getSession().setAttribute("DiffWorker", worker);
+			worker.start();
+
+			int diffCount = this.diff(baseFile, testFile, reportDir);
+
+			response.setContentType("text/html");
+			response.setHeader("Cache-control", "no-cache, no-store");
+			response.setHeader("Pragma", "no-cache");
+			response.setHeader("Expires", "-1");
+
+			response.setHeader("Access-Control-Allow-Origin", "*");
+			response.setHeader("Access-Control-Allow-Methods", "POST");
+			response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+			response.setHeader("Access-Control-Max-Age", "86400");
+
+			JSONObject json = new JSONObject();
+			json.put("success", true);
+			json.put("diffCount", diffCount);
+			json.put("tempID", this.tempID);
+			json.put("reportUrl", getRelReportUrl(tempFolder));
+
+			responseWriter.println(json.toString());
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			if (baseOut != null) {
+				baseOut.close();
+			}
+			if (testOut != null) {
+				testOut.close();
+			}
+			if (responseWriter != null) {
+				responseWriter.close();
+			}
+			if (baseFilecontent != null) {
+				baseFilecontent.close();
+			}
+			if (testFilecontent != null) {
+				testFilecontent.close();
+			}
+		}*/
 	}
 
-	private static String createTempFolder(String path) {
+	private void reponseError(HttpServletResponse response, String error, Exception e) {
+
+	}
+
+	private int diff(File base, File test, File reportDir) {
+		int diffCount = PDFDiffTool.diff(base, test, reportDir);
+		return diffCount;
+	}
+
+	private static File createTempFolder(String root) {
 		String temp = "" + System.currentTimeMillis() + (new Random()).nextLong();
-		return path += temp + "/";
+		String path = root + temp + "/";
+		File tempFolder = new File(path);
+		if (tempFolder.mkdirs()) {
+			return tempFolder;
+		}
+		return null;
+	}
+
+	private static String getRelReportUrl(File tempFolder) {
+		return "/pdfs/" + tempFolder.getName() + "/report/" + "report.html";
+
 	}
 
 	private static void copyStream(InputStream in, OutputStream out) throws IOException {
@@ -142,34 +345,19 @@ public class DiffServlet extends HttpServlet {
 		return null;
 	}
 
-	protected void doPost_1(HttpServletRequest request, HttpServletResponse response)
-			throws ServletException, IOException {
-		if (!ServletFileUpload.isMultipartContent(request)) {
-			throw new IllegalArgumentException(
-					"Request is not multipart, please 'multipart/form-data' enctype for your form.");
-		}
+	@Override
+	public void destroy() {
+		queue.clear();
+		notifierThread.interrupt();
+	}
 
-		ServletFileUpload uploadHandler = new ServletFileUpload(new DiskFileItemFactory());
-		// PrintWriter writer = response.getWriter();
+	private void notify(String cMessage) throws IOException {
 		try {
-			List<FileItem> items = uploadHandler.parseRequest(request);
-			for (FileItem item : items) {
-				System.out.print(item.getContentType());
-				System.out.print(item.getFieldName());
-				if (!item.isFormField()) {
-					File file = new File(request.getServletContext().getRealPath("/") + "pdfs/", item.getName());
-					// item.write(file);
-				}
-			}
-
-			RequestDispatcher view = request.getRequestDispatcher("/index.html");
-			view.forward(request, response);
-		} catch (FileUploadException e) {
-			throw new RuntimeException(e);
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		} finally {
-			// writer.close();
+			messageQueue.put(cMessage);
+		} catch (Exception ex) {
+			IOException t = new IOException();
+			t.initCause(ex);
+			throw t;
 		}
 	}
 
@@ -177,5 +365,6 @@ public class DiffServlet extends HttpServlet {
 	public String getServletInfo() {
 		return "Short description";
 	}// </editor-fold>
+
 
 }

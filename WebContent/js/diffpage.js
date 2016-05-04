@@ -1,3 +1,10 @@
+/*namespace*/
+
+function onload() {
+	$("#progress-div").hide();
+	$("#compare-btn").click = app.post;
+}
+
 var showMessage = function(alert, msg) {
 	/* alert-success | alert-info | alert-warning | alert-danger */
 	var alertdiv = document.createElement("div");
@@ -34,45 +41,175 @@ var clearAlertMessage = function() {
 	$("#info-bar").empty();
 }
 
-$("#compare-btn").click(function() {
+/*$("#compare-btn").click(function() {});*/
 
-	clearAlertMessage();
+var progressTimer = {
+	update : function() {
+		$.getJSON("DiffProgressServlet", function(progress) {
+			$(".progress-bar").css["aria-valuenow"] = progress;
+		});
+	},
 
-	var formData = new FormData();
-	var base_file = $('#input-base-pdf');
-	var test_file = $('#input-test-pdf');
-	var ret = false;
-	if (base_file.prop('files')[0] === undefined) {
-		showMessage("alert-warning", "Please select a base PDF file.");
-		ret = true;
+	progressListener : null,
+	start : function() {
+		this.progressListener = setInterval(this.update, 1000);
+	},
+
+	stop : function() {
+		clearInterval(this.progressListener);
 	}
+}
 
-	if (test_file.prop('files')[0] === undefined) {
-		showMessage("alert-warning", "Please select a comparison PDF file.");
-		ret = true;
-	}
-	if (ret) {
-		return;
-	}
-
-	formData.append("base_pdf", base_file.prop('files')[0]);
-	formData.append("test_file", test_file.prop('files')[0]);
-
-	formData.append("accountnum", 123456);
-
-	$.ajax({
-		type : 'POST',
-		url : 'DiffServlet',
-		data : formData,
-		processData : false,
-		contentType : false,
-		success : function(res) {
-			console.log('success.');
-			console.log(res);
-		},
-
-		error : function(r) {
-			showMessage("alert-danger", "Can't get server!");
+// //////////////////////////////////////////
+var count = 0;
+var app = {
+	url : 'DiffServlet',
+	initialize : function() {
+//		$('login-name').focus();
+		app.listen();
+	},
+	listen : function() {
+		$('comet-frame').src = app.url + '?' + count;
+		count++;
+	},
+	/*login : function() {
+		var name = $F('login-name');
+		if (!name.length > 0) {
+			$('system-message').style.color = 'red';
+			$('login-name').focus();
+			return;
 		}
-	});
-});
+
+		var query = 'action=login' + '&name=' + encodeURI($F('login-name'));
+		new Ajax.Request(app.url, {
+			postBody : query,
+			onFailure : function(r) {
+				$('display').style.color = 'red';
+				$('display').textContent = 'Fail to make ajax call ' + r.status
+						+ " Error";
+			},
+			onSuccess : function() {
+				$('system-message').style.color = '#2d2b3d';
+				$('system-message').innerHTML = name + ':';
+
+				$('login-button').disabled = true;
+				$('login-form').style.display = 'none';
+				$('message-form').style.display = '';
+				$('message').focus();
+			}
+		});
+	},*/
+/*	post : function() {
+		var message = $F('message');
+		if (!message > 0) {
+			return;
+		}
+		$('message').disabled = true;
+		$('post-button').disabled = true;
+
+		var query = 'action=post' + '&name=' + encodeURI($F('login-name'))
+				+ '&message=' + encodeURI(message);
+		new Ajax.Request(app.url, {
+			postBody : query,
+			onComplete : function() {
+				$('message').disabled = false;
+				$('post-button').disabled = false;
+				$('message').focus();
+				$('message').value = '';
+			}
+		});
+	},*/
+	
+	post : function() {
+		clearAlertMessage();
+
+		var formData = new FormData();
+		var base_file = $('#input-base-pdf');
+		var test_file = $('#input-test-pdf');
+		var ret = false;
+		if (base_file.prop('files')[0] === undefined) {
+			showMessage("alert-warning", "Please select a base PDF file.");
+			ret = true;
+		}
+
+		if (test_file.prop('files')[0] === undefined) {
+			showMessage("alert-warning", "Please select a comparison PDF file.");
+			ret = true;
+		}
+		if (ret) {
+			return;
+		}
+
+		formData.append("base_pdf", base_file.prop('files')[0]);
+		formData.append("test_pdf", test_file.prop('files')[0]);
+
+		formData.append("accountnum", 123456);
+
+		$.ajax({
+			type : 'POST',
+			url : 'DiffServlet',
+			data : formData,
+			processData : false,
+			contentType : false,
+
+			beforeSend : function() {
+				$("#progress-div").show();
+				$("#compare-btn").hide();
+
+				progressTimer.start();
+			},
+
+			complete : function() {
+				$("#progress-div").hide();
+				$("#compare-btn").show();
+
+				progressTimer.stop();
+			},
+
+			success : function(res) {
+				console.log('success.');
+				console.log(res);
+			},
+
+			error : function(r) {
+				showMessage("alert-danger", "Can't get server!");
+			}
+		});
+	},
+	
+	update : function(data) {
+		var p = document.createElement('p');
+		p.innerHTML = data.name + ':<br/>' + data.message;
+
+		$('display').appendChild(p);
+
+		new Fx.Scroll('display').down();
+	}
+};
+
+/*var rules = {
+	'#login-name' : function(elem) {
+		Event.observe(elem, 'keydown', function(e) {
+			if (e.keyCode == 13) {
+				$('login-button').focus();
+			}
+		});
+	},
+	'#login-button' : function(elem) {
+		elem.onclick = app.login;
+	},
+	'#message' : function(elem) {
+		Event.observe(elem, 'keydown', function(e) {
+			if (e.keyCode == 13) {
+				$('post-button').focus();
+			} else if (e.e.ctrlKey && e.keyCode == 13) {
+				$('message').textContent = "\n"
+			}
+		});
+	},
+	'#post-button' : function(elem) {
+		elem.onclick = app.post;
+	}
+};*/
+Behaviour.addLoadEvent(app.initialize);
+//Behaviour.register(rules);
