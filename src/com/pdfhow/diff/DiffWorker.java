@@ -1,7 +1,6 @@
 package com.pdfhow.diff;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
 
 import org.apache.pdfbox.tools.diff.DiffLogger;
@@ -13,12 +12,15 @@ public class DiffWorker extends Thread {
 	private File testFile;
 	private File reportDir;
 	private ProgressedDiffLogger logger;
+	private String sessionID;
 
-	public DiffWorker(File baseFile, File testFile, File reportDir, BlockingQueue<String> messageQueue) {
+	public DiffWorker(File baseFile, File testFile, File reportDir, BlockingQueue<ScriptMessage> messageQueue,
+			String sessionID) {
 		this.baseFile = baseFile;
 		this.testFile = testFile;
 		this.reportDir = reportDir;
 		this.logger = new ProgressedDiffLogger(messageQueue);
+		this.sessionID = sessionID;
 	}
 
 	@Override
@@ -33,17 +35,17 @@ public class DiffWorker extends Thread {
 
 	class ProgressedDiffLogger extends DiffLogger {
 
-		private BlockingQueue<String> messageQueue;
+		private BlockingQueue<ScriptMessage> messageQueue;
 
-		public ProgressedDiffLogger(BlockingQueue<String> messageQueue) {
+		public ProgressedDiffLogger(BlockingQueue<ScriptMessage> messageQueue) {
 			this.messageQueue = messageQueue;
 		}
 
 		@Override
 		public void info(String msg) {
 			try {
-				String cMessage = BEGIN_SCRIPT_TAG + toJsonp("info", msg) + END_SCRIPT_TAG;
-				messageQueue.put(cMessage);
+				System.out.println(msg);
+				messageQueue.put(new ScriptMessage(sessionID, msg, ScriptMessage.SCRIPT_METHOD.update));
 			} catch (Exception ex) {
 				ex.printStackTrace(System.out);
 			}
@@ -59,61 +61,6 @@ public class DiffWorker extends Thread {
 
 		@Override
 		public void error(Throwable t) {
-		}
-
-		private static final String BEGIN_SCRIPT_TAG = "<script type='text/javascript'>\n";
-
-		private static final String END_SCRIPT_TAG = "</script>\n";
-		
-		private String escape(String orig) {
-			StringBuffer buffer = new StringBuffer(orig.length());
-
-			for (int i = 0; i < orig.length(); i++) {
-				char c = orig.charAt(i);
-				switch (c) {
-				case '\b':
-					buffer.append("\\b");
-					break;
-				case '\f':
-					buffer.append("\\f");
-					break;
-				case '\n':
-					buffer.append("<br />");
-					break;
-				case '\r':
-					// ignore
-					break;
-				case '\t':
-					buffer.append("\\t");
-					break;
-				case '\'':
-					buffer.append("\\'");
-					break;
-				case '\"':
-					buffer.append("\\\"");
-					break;
-				case '\\':
-					buffer.append("\\\\");
-					break;
-				case '<':
-					buffer.append("&lt;");
-					break;
-				case '>':
-					buffer.append("&gt;");
-					break;
-				case '&':
-					buffer.append("&amp;");
-					break;
-				default:
-					buffer.append(c);
-				}
-			}
-
-			return buffer.toString();
-		}
-
-		private String toJsonp(String name, String message) {
-			return "window.parent.app.update({ name: \"" + escape(name) + "\", message: \"" + escape(message) + "\" });\n";
 		}
 	}
 }

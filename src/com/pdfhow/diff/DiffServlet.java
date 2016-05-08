@@ -7,9 +7,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Queue;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -25,8 +29,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.Part;
 
-import org.apache.pdfbox.tools.diff.PDFDiffTool;
-import org.json.JSONObject;
+import com.pdfhow.diff.ScriptMessage.SCRIPT_METHOD;
 
 /**
  *
@@ -35,9 +38,12 @@ import org.json.JSONObject;
 @WebServlet(name = "DiffServlet", urlPatterns = { "/DiffServlet" }, asyncSupported = true)
 @MultipartConfig
 public class DiffServlet extends HttpServlet {
+	
 	private static final Queue<AsyncContext> queue = new ConcurrentLinkedQueue<AsyncContext>();
-
-	private static final BlockingQueue<String> messageQueue = new LinkedBlockingQueue<String>();
+	
+	private static final Map<String, AsyncContext> map = new ConcurrentHashMap<String, AsyncContext>();
+	
+	private static final BlockingQueue<ScriptMessage> messageQueue = new LinkedBlockingQueue<ScriptMessage>();
 
 	private static final String JUNK = "<!-- Comet is a programming technique that enables web "
 			+ "servers to send data to the client without having any need " + "for the client to request it. -->\n";
@@ -45,8 +51,7 @@ public class DiffServlet extends HttpServlet {
 	private Thread notifierThread = null;
 
 	private static final long serialVersionUID = 1278840531343993218L;
-	private String tempID;
-
+	
 	@Override
 	public void init(ServletConfig config) throws ServletException {
 		super.init(config);
@@ -54,10 +59,26 @@ public class DiffServlet extends HttpServlet {
 			public void run() {
 				boolean done = false;
 				while (!done) {
-					String cMessage = null;
+					ScriptMessage cMessage = null;
 					try {
 						cMessage = messageQueue.take();
-						for (AsyncContext ac : queue) {
+						AsyncContext ac = map.get(cMessage.getSessionID());
+						if (ac == null) {
+							continue;
+						}
+						try {
+							PrintWriter acWriter = ac.getResponse().getWriter();
+							acWriter.println(cMessage.getScriptMessage());
+							acWriter.flush();
+							
+							if (SCRIPT_METHOD.timeout == cMessage.getMethod()) {
+								removeCtx(ac);
+							}
+						} catch (IOException ex) {
+							System.out.println(ex);
+							queue.remove(ac);
+						}
+/*						for (AsyncContext ac : queue) {
 							try {
 								PrintWriter acWriter = ac.getResponse().getWriter();
 								acWriter.println(cMessage);
@@ -66,7 +87,7 @@ public class DiffServlet extends HttpServlet {
 								System.out.println(ex);
 								queue.remove(ac);
 							}
-						}
+						}*/
 					} catch (InterruptedException iex) {
 						done = true;
 						System.out.println(iex);
@@ -93,61 +114,57 @@ public class DiffServlet extends HttpServlet {
 		writer.flush();
 
 		final AsyncContext ac = req.startAsync();
-		ac.setTimeout(1 * 60 * 1000);
+		
+		final String uid = req.getQueryString();
+//		ac.setTimeout(10 * 60 * 1000);
+		ac.setTimeout(30 * 1000);
 		ac.addListener(new AsyncListener() {
 			public void onComplete(AsyncEvent event) throws IOException {
-				queue.remove(ac);
+//				queue.remove(ac);
+				removeCtx(ac);
 			}
 
 			public void onTimeout(AsyncEvent event) throws IOException {
 				System.out.println(ac.toString() + " timeout");
-				queue.remove(ac);
+				try {
+					messageQueue.put(new ScriptMessage(uid, "timeout", ScriptMessage.SCRIPT_METHOD.timeout));
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+//				queue.remove(ac);
+//				removeCtx();
 			}
 
 			public void onError(AsyncEvent event) throws IOException {
-				queue.remove(ac);
+//				queue.remove(ac);
+				removeCtx(ac);
 			}
 
 			public void onStartAsync(AsyncEvent event) throws IOException {
 			}
-		});
-		queue.add(ac);
+ 		});
+//		queue.add(ac);
+		map.put(uid, ac);
 	}
-
+	
+	private void removeCtx(AsyncContext ac) {
+		Iterator<Entry<String, AsyncContext>> it = map.entrySet().iterator();
+		while (it.hasNext()) {
+			if (it.next().getValue() == ac) {
+				it.remove();
+				break;
+			}
+		}
+	}
+	
 	@Override
 	protected void doPost(HttpServletRequest request, HttpServletResponse response)
 			throws ServletException, IOException {
 		response.setContentType("text/plain");
 		response.setHeader("Cache-Control", "private");
 		response.setHeader("Pragma", "no-cache");
-
-		PrintWriter writer = response.getWriter();
-		// for Safari, Chrome, IE and Opera
-		for (int i = 0; i < 10; i++) {
-			writer.write(JUNK);
-		}
-		writer.flush();
-
-		final AsyncContext ac = request.startAsync();
-		ac.setTimeout(1 * 60 * 1000);
-		ac.addListener(new AsyncListener() {
-			public void onComplete(AsyncEvent event) throws IOException {
-				queue.remove(ac);
-			}
-
-			public void onTimeout(AsyncEvent event) throws IOException {
-				System.out.println(ac.toString() + " timeout");
-				queue.remove(ac);
-			}
-
-			public void onError(AsyncEvent event) throws IOException {
-				queue.remove(ac);
-			}
-
-			public void onStartAsync(AsyncEvent event) throws IOException {
-			}
-		});
-		queue.add(ac);
+		
+		String uid = request.getQueryString();
 		
 		OutputStream baseOut = null;
 		OutputStream testOut = null;
@@ -158,7 +175,6 @@ public class DiffServlet extends HttpServlet {
 
 			String warRoot = request.getServletContext().getRealPath("/");
 			File tempFolder = createTempFolder(warRoot + "pdfs/");
-			this.tempID = tempFolder.getName();
 
 			Part basePDF = request.getPart("base_pdf");
 			String baseFileName = getFileName(basePDF);
@@ -192,7 +208,7 @@ public class DiffServlet extends HttpServlet {
 
 			File reportDir = new File(tempFolder, "report");
 
-			DiffWorker worker = new DiffWorker(baseFile, testFile, reportDir, messageQueue);
+			DiffWorker worker = new DiffWorker(baseFile, testFile, reportDir, messageQueue, uid);
 //			request.getSession().setAttribute("DiffWorker", worker);
 			worker.start();
 			
@@ -308,11 +324,6 @@ public class DiffServlet extends HttpServlet {
 
 	}
 
-	private int diff(File base, File test, File reportDir) {
-		int diffCount = PDFDiffTool.diff(base, test, reportDir);
-		return diffCount;
-	}
-
 	private static File createTempFolder(String root) {
 		String temp = "" + System.currentTimeMillis() + (new Random()).nextLong();
 		String path = root + temp + "/";
@@ -339,7 +350,11 @@ public class DiffServlet extends HttpServlet {
 	private String getFileName(final Part part) {
 		for (String content : part.getHeader("content-disposition").split(";")) {
 			if (content.trim().startsWith("filename")) {
-				return content.substring(content.indexOf('=') + 1).trim().replace("\"", "");
+				String val = content.substring(content.indexOf('=') + 1).trim();
+				val = val.replace("\"", "");
+				val = val.replace("\\", "/");
+				val = val.substring(val.lastIndexOf('/') + 1, val.length());
+				return val;
 			}
 		}
 		return null;
@@ -348,17 +363,8 @@ public class DiffServlet extends HttpServlet {
 	@Override
 	public void destroy() {
 		queue.clear();
+		map.clear();
 		notifierThread.interrupt();
-	}
-
-	private void notify(String cMessage) throws IOException {
-		try {
-			messageQueue.put(cMessage);
-		} catch (Exception ex) {
-			IOException t = new IOException();
-			t.initCause(ex);
-			throw t;
-		}
 	}
 
 	@Override

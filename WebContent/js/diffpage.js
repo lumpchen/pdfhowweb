@@ -1,10 +1,5 @@
 /*namespace*/
 
-function onload() {
-	$("#progress-div").hide();
-	$("#compare-btn").click = app.post;
-}
-
 var showMessage = function(alert, msg) {
 	/* alert-success | alert-info | alert-warning | alert-danger */
 	var alertdiv = document.createElement("div");
@@ -61,17 +56,28 @@ var progressTimer = {
 }
 
 // //////////////////////////////////////////
-var count = 0;
+var guid = function() {
+	  return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
+	    s4() + '-' + s4() + s4() + s4();
+};
+var s4 = function() {
+	  return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+};
+var uid = guid();
 var app = {
 	url : 'DiffServlet',
 	initialize : function() {
 //		$('login-name').focus();
+		$("#progress-div").hide();
+		$("#compare-btn").click = app.post;
+		
 		app.listen();
 	},
 	listen : function() {
-		$('comet-frame').src = app.url + '?' + count;
-		count++;
+		$('#comet-frame').attr('src', app.url + '?' + uid);
 	},
+
+		
 	/*login : function() {
 		var name = $F('login-name');
 		if (!name.length > 0) {
@@ -127,12 +133,12 @@ var app = {
 		var base_file = $('#input-base-pdf');
 		var test_file = $('#input-test-pdf');
 		var ret = false;
-		if (base_file.prop('files')[0] === undefined) {
+		if (base_file.prop('files')[0] === undefined || base_file.prop('files')[0] === null) {
 			showMessage("alert-warning", "Please select a base PDF file.");
 			ret = true;
 		}
 
-		if (test_file.prop('files')[0] === undefined) {
+		if (test_file.prop('files')[0] === undefined || test_file.prop('files')[0] === null) {
 			showMessage("alert-warning", "Please select a comparison PDF file.");
 			ret = true;
 		}
@@ -143,11 +149,13 @@ var app = {
 		formData.append("base_pdf", base_file.prop('files')[0]);
 		formData.append("test_pdf", test_file.prop('files')[0]);
 
-		formData.append("accountnum", 123456);
+//		formData.append("uid", app.uid);
+		
+		$('#display').empty();
 
 		$.ajax({
 			type : 'POST',
-			url : 'DiffServlet',
+			url : app.url + '?' + uid,
 			data : formData,
 			processData : false,
 			contentType : false,
@@ -179,11 +187,15 @@ var app = {
 	
 	update : function(data) {
 		var p = document.createElement('p');
-		p.innerHTML = data.name + ':<br/>' + data.message;
+		p.innerHTML = data.name + ' : ' + data.message;
 
-		$('display').appendChild(p);
+		$('#display').append(p);
 
-		new Fx.Scroll('display').down();
+//		new Fx.Scroll('display').down();
+	},
+	timeout : function(data) {
+//		uid = guid();
+		app.listen();
 	}
 };
 
